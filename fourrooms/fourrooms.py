@@ -2,7 +2,7 @@ import numpy as np
 from gym import core, spaces
 from gym.envs.registration import register
 
-class Fourrooms:
+class Fourrooms(core.Env):
     def __init__(self):
         layout = """\
 wwwwwwwwwwwww
