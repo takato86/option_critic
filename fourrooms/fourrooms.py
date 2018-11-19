@@ -49,6 +49,9 @@ wwwwwwwwwwwww
                 avail.append(nextcell)
         return avail
 
+    def to_cell(self, index):
+        return self.tocell[index]
+
     def reset(self):
         state = self.rng.choice(self.init_states)
         self.currentcell = self.tocell[state]

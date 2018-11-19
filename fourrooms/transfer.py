@@ -6,6 +6,14 @@ from fourrooms import Fourrooms
 from scipy.special import expit
 from scipy.misc import logsumexp
 import dill
+import os
+
+
+'''
+avg_duration: 1つのOptionが続けられる平均ステップ数
+step        : 1エピソードに要したステップ数
+'''
+
 
 class Tabular:
     def __init__(self, nstates):
@@ -202,6 +210,7 @@ if __name__ == '__main__':
 
     fname = '-'.join(['{}_{}'.format(param, val) for param, val in sorted(vars(args).items())])
     fname = 'optioncritic-fourrooms-' + fname + '.npy'
+    fdir = 'models'
 
     possible_next_goals = [68, 69, 70, 71, 72, 78, 79, 80, 81, 82, 88, 89, 90, 91, 92, 93, 99, 100, 101, 102, 103]
 
@@ -288,6 +297,7 @@ if __name__ == '__main__':
             history[run, episode, 0] = step
             history[run, episode, 1] = avgduration
             print('Run {} episode {} steps {} cumreward {} avg. duration {} switches {}'.format(run, episode, step, cumreward, avgduration, option_switches))
-        np.save(fname, history)
-        dill.dump({'intra_policies':option_policies, 'policy':policy, 'term':option_terminations}, open('oc-options.pl', 'wb'))
+        fpath = os.path.join(fdir, fname)
+        np.save(fdir, history)
+        dill.dump({'intra_policies':option_policies, 'policy':policy, 'term':option_terminations}, open(os.path.join(fdir,'oc-options.pl'), 'wb'))
         print(fname)
