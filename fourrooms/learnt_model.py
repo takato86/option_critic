@@ -31,7 +31,7 @@ if __name__ == "__main__":
     possible_next_goals = [68, 69, 70, 71, 72, 78, 79, 80, 81, 82, 88, 89, 90, 91, 92, 93, 99, 100, 101, 102, 103]
     rng = np.random.RandomState(1234)
 
-    with open('oc-options.pl', 'rb') as f:
+    with open('models/oc-options.pl', 'rb') as f:
         obj = dill.loads(f.read())
     
     intra_policies = obj['intra_policies']
@@ -88,7 +88,7 @@ if __name__ == "__main__":
         for feat in range(nfeatures):
             prob_list.append(term.pmf(feat))
             env_exp[env.unwrapped.to_cell(feat)[1]][env.unwrapped.to_cell(feat)[0]] = term.pmf(feat)
-        env_exp[goal[1]][goal[0]] = 0.8
+        #env_exp[goal[1]][goal[0]] = 0.8
         term_prob[str(i)] = prob_list
         fig_prob[str(i)] = env_exp
         #print("{}th termination func: {} ".format(i,prob_list))

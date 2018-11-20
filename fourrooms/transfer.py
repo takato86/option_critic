@@ -298,6 +298,6 @@ if __name__ == '__main__':
             history[run, episode, 1] = avgduration
             print('Run {} episode {} steps {} cumreward {} avg. duration {} switches {}'.format(run, episode, step, cumreward, avgduration, option_switches))
         fpath = os.path.join(fdir, fname)
-        np.save(fdir, history)
+        np.save(fpath, history)
         dill.dump({'intra_policies':option_policies, 'policy':policy, 'term':option_terminations}, open(os.path.join(fdir,'oc-options.pl'), 'wb'))
         print(fname)
