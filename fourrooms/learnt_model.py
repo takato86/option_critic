@@ -11,15 +11,7 @@ import os
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-class Tabular:
-    def __init__(self, nstates):
-        self.nstates = nstates
-
-    def __call__(self, state):
-        return np.array([state,])
-
-    def __len__(self):
-        return self.nstates
+from transfer import Tabular
 
 if __name__ == "__main__":
     rng = np.random.RandomState(1234)
@@ -84,24 +76,26 @@ if __name__ == "__main__":
     for i, term in enumerate(term_list):
         print('term-{}'.format(i))
         prob_list = []
-        env_exp = np.full(env_shape, -1, dtype=np.float)
+        env_exp = np.full(env_shape, 0, dtype=np.float)
         for feat in range(nfeatures):
             prob_list.append(term.pmf(feat))
-            env_exp[env.unwrapped.to_cell(feat)[1]][env.unwrapped.to_cell(feat)[0]] = term.pmf(feat)
+            env_exp[env.unwrapped.to_cell(feat)[0]][env.unwrapped.to_cell(feat)[1]] = term.pmf(feat)
         #env_exp[goal[1]][goal[0]] = 0.8
         term_prob[str(i)] = prob_list
         fig_prob[str(i)] = env_exp
         #print("{}th termination func: {} ".format(i,prob_list))
 
     plt.subplot(2,2,1)
-    sns.heatmap(fig_prob["0"])
+    plt.title("Option 1")
+    sns.heatmap(fig_prob["0"], annot=True)
     plt.subplot(2,2,2)
-    sns.heatmap(fig_prob["1"])
+    plt.title("Option 2")
+    sns.heatmap(fig_prob["1"], annot=True)
     plt.subplot(2,2,3)
-    sns.heatmap(fig_prob["2"])
+    plt.title("Option 3")
+    sns.heatmap(fig_prob["2"], annot=True)
     plt.subplot(2,2,4)
-    sns.heatmap(fig_prob["3"])
+    plt.title("Option 4")
+    sns.heatmap(fig_prob["3"], annot=True)
+    plt.tight_layout()
     plt.show()
-    
-# oc-options.pl
-# optioncritic-fourrooms-baseline_True-discount_0.99-epsilon_0.01-lr_critic_0.5-lr_intra_0.25-lr_term_0.25-nepisodes_250-noptions_4-nruns_50-nsteps_1000-primitive_False-temperature_0.01.npy

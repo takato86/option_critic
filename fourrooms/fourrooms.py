@@ -1,24 +1,34 @@
 import numpy as np
+
 from gym import core, spaces
 from gym.envs.registration import register
 
 class Fourrooms(core.Env):
     def __init__(self):
         layout = """\
-wwwwwwwwwwwww
-w     w     w
-w     w     w
-w           w
-w     w     w
-w     w     w
-ww wwww     w
-w     www www
-w     w     w
-w     w     w
-w           w
-w     w     w
-wwwwwwwwwwwww
+wwwwwwwwwwwwwwwwwwwwwww
+w     w     w         w
+w     w     w         w
+w                     w
+w     w     w         w
+w     w     w         w
+wwwwwwwwwwwwwwwwwwwwwww
 """
+#         layout = """\
+# wwwwwwwwwwwww
+# w     w     w
+# w     w     w
+# w           w
+# w     w     w
+# w     w     w
+# ww wwww     w
+# w     www www
+# w     w     w
+# w     w     w
+# w           w
+# w     w     w
+# wwwwwwwwwwwww
+# """
         self.occupancy = np.array([list(map(lambda c: 1 if c=='w' else 0, line)) for line in layout.splitlines()])
 
         # From any state the agent can perform one of four actions, up, down, left or right
@@ -30,14 +40,16 @@ wwwwwwwwwwwww
 
         self.tostate = {}
         statenum = 0
-        for i in range(13):
-            for j in range(13):
+        height = self.occupancy.shape[0]
+        width = self.occupancy.shape[1]
+        for i in range(height):
+            for j in range(width):
                 if self.occupancy[i, j] == 0:
                     self.tostate[(i,j)] = statenum
                     statenum += 1
         self.tocell = {v:k for k,v in self.tostate.items()}
-
-        self.goal = 62
+        #self.goal = 62
+        self.goal = self.tostate[(5, 21)]
         self.init_states = list(range(self.observation_space.n))
         self.init_states.remove(self.goal)
 
