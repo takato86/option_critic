@@ -1,5 +1,6 @@
 import argparse
 import numpy as np
+import matplotlib.pyplot as plt
 import sys
 import gym
 from gym import wrappers, logger
@@ -15,12 +16,14 @@ class OptionCriticAgent(object):
         self.action_space = action_space
         self.basis_order = 3
         self.shape_state = observation_space.shape
-        self.options = [Option(action_space.n, observation_space.shape[0]) for i in range(4)]
+        self.n_options = 4
+        self.options = [Option(action_space.n, observation_space.shape[0]) for i in range(self.n_options)]
         self.w_q = np.random.rand(len(self.options), action_space.n, self.basis_order) # the number of orders
         self.c_phi = np.random.randint(0, self.basis_order + 1, (len(self.options), action_space.n, self.basis_order, observation_space.shape[0]))
         self.c_phi = self.c_phi.astype(np.float64)
         self.q_u = np.random.rand(len(self.options), action_space.n)
-        self.gamma = 0.01
+        self.epsilon = 0.01
+        self.gamma = 0.99
         self.lr_wq = 0.01
         self.lr_cphi = 0.01
     def act(self, observation, o):
@@ -79,7 +82,6 @@ class OptionCriticAgent(object):
         option = self.options[o]
         q_u_list = self._get_q_u_list(obs, o)
         policy = option.get_intra_option_dist(q_u_list)
-        import pdb; pdb.set_trace()
         return np.dot(policy, q_u_list)
 
     def _get_q_omega_list(self, obs):
@@ -102,9 +104,16 @@ class OptionCriticAgent(object):
         return np.cos(in_tri)
 
     def get_option(self, obs):
-        q_omega_list = self._get_q_omega_list(obs)
-        return np.argmax(q_omega_list)
-        
+        rand = np.random.rand()
+        if rand > self.epsilon:
+            q_omega_list = self._get_q_omega_list(obs)
+            return np.argmax(q_omega_list)
+        else:
+            return np.random.choice(self.n_options)
+
+    def get_terminate(self, obs, o):
+        return self.options[o].get_terminate(obs)
+
 class Option(object):
     def __init__(self, n_actions, n_obs):
         self.n_actions = n_actions
@@ -123,7 +132,7 @@ class Option(object):
         """
         delta = -self.theta**-2*(q_u_list[a]+ np.sum(q_u_list))*q_u_list[a]
         self.theta += self.lr_theta * delta
-    
+
     def _update_vartheta(self, obs, q_omega, v_omega):
         """
         termination function gradient theorem
@@ -148,6 +157,12 @@ class Option(object):
         numerator = np.exp(energy)
         denominator = np.sum(numerator)
         return numerator/denominator
+    
+    def exp(self, x):
+        if x > 709:
+            x = 709
+        return np.exp(x)
+        
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=None)
@@ -163,22 +178,34 @@ if __name__ == '__main__':
     episode_count = 100
     reward = 0
     done = False
+    total_reward_list = []
+    steps_list = []
     try:
         for i in range(episode_count):
+            total_reward = 0
+            n_steps = 0
             print("episode: {}".format(i))
             ob = env.reset()
             option = agent.get_option(ob)
             while True:
-                env.render()
+                n_steps += 1
                 action = agent.act(ob, option)
                 pre_obs = ob
                 ob, reward, done, _ = env.step(action)
+                total_reward += reward
                 if args.debug:
                     agent.update(pre_obs, action, ob, reward, done, option)
                     import pdb; pdb.set_trace()
                     exit()
-                if done:
+                if done or n_steps > 10000:
+                    print("episode: {}, steps: {}, total_reward: {}".format(i, n_steps, total_reward))
+                    total_reward_list.append(total_reward)
+                    steps_list.append(n_steps)
                     break
+                agent.update(pre_obs, action, ob, reward, done, option)
+                if agent.get_terminate(ob, option):
+                    option = agent.get_option(ob)
+                
                 # Note there's no env.render() here. But the environment still can open window and
                 # render if asked by env.monitor: it calls env.render('rgb_array') to record video.
                 # Video is not recorded every episode, see capped_cubic_video_schedule for details.
@@ -186,4 +213,12 @@ if __name__ == '__main__':
         # Close the env and write monitor result info to disk
     except KeyboardInterrupt:
         pass
+    total_reward_list = np.array(total_reward_list)
+    steps_list = np.array(steps_list)
+    x = list(range(len(total_reward_list)))
+    plt.subplot(1,2,1)
+    plt.plot(x, total_reward_list)
+    plt.subplot(1,2,2)
+    plt.plot(x, steps_list)
+    plt.show()
     env.close()
