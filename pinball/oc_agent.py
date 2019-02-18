@@ -9,6 +9,7 @@ import gym_pinball
 import pdb
 import os
 from datetime import datetime
+import copy
 
 class OptionCriticAgent(object):
     """
@@ -24,7 +25,6 @@ class OptionCriticAgent(object):
         self.w_q = np.random.rand(len(self.options), action_space.n, self.basis_order) # the number of orders
         self.c_phi = np.random.randint(0, self.basis_order + 1, (len(self.options), action_space.n, self.basis_order, observation_space.shape[0]))
         self.c_phi = self.c_phi.astype(np.float64)
-        self.q_u = np.random.rand(len(self.options), action_space.n)
         self.epsilon = 0.01
         self.gamma = 0.99
         self.lr_wq = 0.01
@@ -38,13 +38,33 @@ class OptionCriticAgent(object):
         action = np.argmax(option.get_intra_option_dist(q_u_list))
         return action
     
+    def gestation(self, pre_obs, a, obs, r, done):
+        o = 0 # Optionは固定
+        option = self.options[o] 
+        q_u_list = self._get_q_u_list(pre_obs, o)
+        td_error = r - q_u_list[a]
+        if not done:
+            term_prob = option.get_terminate(obs)
+            q_omega_list = self._get_q_omega_list(obs)
+            td_error += self.gamma * ((1 - term_prob) * q_omega_list[o] + term_prob * np.max(q_omega_list))
+        self.td_error_list.append(abs(td_error))
+        self._update_w_q(td_error, a, o, pre_obs)
+        self._update_c_phi(td_error, a, o, pre_obs)
+
+    def sync_q_u(self):
+        base_w_q = self.w_q[0]
+        base_c_phi = self.c_phi[0]
+        for i in range(1, self.n_options):
+            self.w_q[i] = copy.deepcopy(base_w_q)
+            self.c_phi[i] = copy.deepcopy(base_c_phi)
+
     def update(self, pre_obs, a, obs, r, done, o):
         q_u_list = self._get_q_u_list(pre_obs, o)
         td_error = r - q_u_list[a]
         option = self.options[o]
         if not done:
             term_prob = option.get_terminate(obs)
-            q_omega_list = self._get_q_omega_list(obs) #戦犯
+            q_omega_list = self._get_q_omega_list(obs)
             td_error += self.gamma * ((1 - term_prob) * q_omega_list[o] + term_prob * np.max(q_omega_list))
         self.td_error_list.append(abs(td_error))
         self._update_w_q(td_error, a, o, pre_obs)
@@ -55,6 +75,7 @@ class OptionCriticAgent(object):
 
     def _update_w_q(self, td_error, a, o, obs):
         delta_list = []
+        # TODO 行列計算の形で書き換え
         for c_phi_a in self.c_phi[o][a]:
             delta = np.cos(np.pi * np.dot(c_phi_a, obs))
             delta_list.append(self.lr_wq * delta * td_error)
@@ -63,9 +84,10 @@ class OptionCriticAgent(object):
     
     def _update_c_phi(self, td_error, a, o, obs):
         delta_list = []
+        # TODO 行列計算の形で書き換え
         for i in range(self.basis_order):
             c_delta_list = []
-            basis_delta = self.w_q[o][a][i] * np.sin(np.pi * np.dot(self.c_phi[o][a][i], obs)) * np.pi
+            basis_delta = self.w_q[o][a][i] * -np.sin(np.pi * np.dot(self.c_phi[o][a][i], obs)) * np.pi
             for j in range(len(obs)):
                 c_delta = self.lr_cphi * basis_delta * obs[j] * td_error
                 c_delta_list.append(c_delta)
@@ -90,6 +112,9 @@ class OptionCriticAgent(object):
         q_u_list = self._get_q_u_list(obs, o)
         policy = option.get_intra_option_dist(q_u_list)
         return np.dot(policy, q_u_list)
+
+    def get_max_q_u(self, obs, o):
+        return np.max(self._get_q_u_list(obs, o))
 
     def _get_q_omega_list(self, obs):
         return [self._get_q_omega(obs, o) for o in range(len(self.options))]
@@ -125,7 +150,7 @@ class OptionCriticAgent(object):
         if not os.path.exists(dir_path):
             os.makedirs(dir_path)
         file_path = os.path.join(dir_path, 'oc_model.npz')
-        np.savez(file_path, w_q=self.w_q, c_phi=self.c_phi, q_u=self.q_u)
+        np.savez(file_path, w_q=self.w_q, c_phi=self.c_phi)
         for i, option in enumerate(self.options):
             option.save_model(os.path.join(dir_path, 'option{}.npz'.format(i+1)))
 
@@ -135,7 +160,6 @@ class OptionCriticAgent(object):
         if self._check_model(oc_model):
             self.w_q = oc_model['w_q']
             self.c_phi = oc_model['c_phi']
-            self.q_u = oc_model['q_u']
         else:
             raise Exception('Not suitable model data.')
         for i, option in enumerate(self.options):
@@ -146,8 +170,6 @@ class OptionCriticAgent(object):
         if model['w_q'].shape != self.w_q.shape:
             return False
         if model['c_phi'].shape != self.c_phi.shape:
-            return False
-        if model['q_u'].shape != self.q_u.shape:
             return False
         return True
         
@@ -245,11 +267,12 @@ if __name__ == '__main__':
     agent = OptionCriticAgent(env.action_space, env.observation_space)
     if args.model:
         agent.load_model(args.model)
-    episode_count = 200
+    episode_count = 500
     reward = 0
     done = False
     total_reward_list = []
     steps_list = []
+    max_q_list = []
     try:
         for i in range(episode_count):
             total_reward = 0
@@ -265,18 +288,24 @@ if __name__ == '__main__':
                 pre_obs = ob
                 ob, reward, done, _ = env.step(action)
                 total_reward += reward
+                max_q_list.append(agent.get_max_q_u(ob, option))
                 if args.debug:
                     agent.update(pre_obs, action, ob, reward, done, option)
                     import pdb; pdb.set_trace()
                     exit()
                 if done:
-                    print("episode: {}, steps: {}, total_reward: {}".format(i, n_steps, total_reward))
+                    print("episode: {}, steps: {}, total_reward: {}, max_q_u: {}".format(i, n_steps, total_reward, max_q_list[-1]))
                     total_reward_list.append(total_reward)
                     steps_list.append(n_steps)
                     break
-                agent.update(pre_obs, action, ob, reward, done, option)
-                if agent.get_terminate(ob, option):
-                    option = agent.get_option(ob)
+                if i <= 10:
+                    agent.gestation(pre_obs, action, ob, reward, done)
+                    if i==10:
+                        agent.sync_q_u()
+                else:
+                    agent.update(pre_obs, action, ob, reward, done, option)
+                    if agent.get_terminate(ob, option):
+                        option = agent.get_option(ob)
                 
                 # Note there's no env.render() here. But the environment still can open window and
                 # render if asked by env.monitor: it calls env.render('rgb_array') to record video.
@@ -295,28 +324,36 @@ if __name__ == '__main__':
     export_csv(saved_res_dir, "td_error.csv", td_error_list)
     total_reward_list = np.array(total_reward_list)
     steps_list = np.array(steps_list)
+    max_q_list = np.array(max_q_list)
     # save model
     saved_model_dir = os.path.join(saved_dir, 'model')
     agent.save_model(saved_model_dir)
     # output graph
     x = list(range(len(total_reward_list)))
-    plt.subplot(2,2,1)
+    plt.subplot(3,2,1)
     y = moved_average(total_reward_list, 10)
     
     plt.plot(x, total_reward_list)
     plt.plot(x, y, 'r--')
     plt.title("total_reward")
-    plt.subplot(2,2,2)
+    plt.subplot(3,2,2)
     y = moved_average(steps_list, 10)
     plt.plot(x, steps_list)
     plt.plot(x, y, 'r--')
     plt.title("the number of steps until goal")
-    plt.subplot(2,1,2)
+    plt.subplot(3,1,2)
     y = moved_average(td_error_list, 1000)
     x = list(range(len(td_error_list)))
     plt.plot(x, td_error_list, 'k-')
     plt.plot(x, y, 'r--', label='average')
     plt.title("td error")
+    plt.legend()
+    plt.subplot(3,1,3)
+    y = moved_average(max_q_list, 1000)
+    x = list(range(len(max_q_list)))
+    plt.plot(x, max_q_list, 'k-')
+    plt.plot(x, y, 'r--', label='average')
+    plt.title("max q_u value")
     plt.legend()
     plt.show()
     env.close()
