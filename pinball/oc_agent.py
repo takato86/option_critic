@@ -1,11 +1,14 @@
 import argparse
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import sys
 import gym
 from gym import wrappers, logger
 import gym_pinball
 import pdb
+import os
+from datetime import datetime
 
 class OptionCriticAgent(object):
     """
@@ -24,8 +27,11 @@ class OptionCriticAgent(object):
         self.q_u = np.random.rand(len(self.options), action_space.n)
         self.epsilon = 0.01
         self.gamma = 0.99
-        self.lr_wq = 0.01
-        self.lr_cphi = 0.01
+        self.lr_wq = 0.05
+        self.lr_cphi = 0.05
+        # variables for analysis
+        self.td_error_list = []
+
     def act(self, observation, o):
         option = self.options[o]
         q_u_list = self._get_q_u_list(observation, o)
@@ -40,6 +46,7 @@ class OptionCriticAgent(object):
             term_prob = option.get_terminate(obs)
             q_omega_list = self._get_q_omega_list(obs) #戦犯
             td_error += self.gamma * ((1 - term_prob) * q_omega_list[o] + term_prob * np.max(q_omega_list))
+        self.td_error_list.append(abs(td_error))
         self._update_w_q(td_error, a, o, pre_obs)
         self._update_c_phi(td_error, a, o, pre_obs)
         q_omega = self._get_q_omega(obs, o)
@@ -114,13 +121,15 @@ class OptionCriticAgent(object):
     def get_terminate(self, obs, o):
         return self.options[o].get_terminate(obs)
 
+
 class Option(object):
     def __init__(self, n_actions, n_obs):
         self.n_actions = n_actions
-        self.theta = np.random.rand(1)
+        self.theta = np.random.rand(n_actions)
         self.vartheta = np.random.rand(n_obs)
         self.lr_theta = 0.01
         self.lr_vartheta = 0.01
+        # variables for analysis     
 
     def update(self, a, obs, q_u_list, q_omega, v_omega):
         self._update_theta(a, obs, q_u_list)
@@ -130,8 +139,9 @@ class Option(object):
         """
         intra option policy gradient theorem
         """
-        delta = -self.theta**-2*(q_u_list[a]+ np.sum(q_u_list))*q_u_list[a]
-        self.theta += self.lr_theta * delta
+        #delta = -self.theta**-2*(q_u_list[a]+ np.sum(q_u_list))*q_u_list[a]
+        delta = -self.theta[a]**-2 * q_u_list[a]**2 * ( 1 - self.get_intra_option_dist(q_u_list)[a])
+        self.theta += self.lr_theta * q_u_list[a] * delta
 
     def _update_vartheta(self, obs, q_omega, v_omega):
         """
@@ -140,29 +150,38 @@ class Option(object):
         advantage = q_omega - v_omega
         beta = self.get_terminate(obs)
         for i, s in enumerate(obs):
-            self.vartheta[i] -= self.lr_vartheta * s * beta * (1 - beta)
+            self.vartheta[i] -= self.lr_vartheta * advantage * s * beta * (1 - beta)
 
     def get_terminate(self, obs):
         """
         linear-sigmoid functions
         """
         linear_sum = np.dot(self.vartheta, obs)
-        return 1/(1 + np.exp(linear_sum))
+        return 1/(1 + self.exp(linear_sum))
 
     def get_intra_option_dist(self, q_u_list):
         """
         Boltzmann policies
         """
         energy = q_u_list/self.theta
-        numerator = np.exp(energy)
+        numerator = self.exp(energy)
         denominator = np.sum(numerator)
         return numerator/denominator
     
     def exp(self, x):
-        if x > 709:
-            x = 709
+        np.where(x > 708, 708, x)
         return np.exp(x)
         
+def export_csv(file_path, file_name, array):
+    if not os.path.exists(file_path):
+        os.makedirs(file_path)
+    array = pd.DataFrame(array)
+    saved_path = os.path.join(file_path, file_name)
+    array.to_csv(saved_path)
+
+def moved_average(data, window_size):
+    b=np.ones(window_size)/window_size
+    return np.convolve(data, b, mode='same')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=None)
@@ -175,7 +194,7 @@ if __name__ == '__main__':
     env = wrappers.Monitor(env, directory=outdir, force=True)
     env.seed(0)
     agent = OptionCriticAgent(env.action_space, env.observation_space)
-    episode_count = 100
+    episode_count = 10
     reward = 0
     done = False
     total_reward_list = []
@@ -188,6 +207,8 @@ if __name__ == '__main__':
             ob = env.reset()
             option = agent.get_option(ob)
             while True:
+                # if i % 5 == 0:
+                #     env.render()
                 n_steps += 1
                 action = agent.act(ob, option)
                 pre_obs = ob
@@ -197,7 +218,7 @@ if __name__ == '__main__':
                     agent.update(pre_obs, action, ob, reward, done, option)
                     import pdb; pdb.set_trace()
                     exit()
-                if done or n_steps > 10000:
+                if done:
                     print("episode: {}, steps: {}, total_reward: {}".format(i, n_steps, total_reward))
                     total_reward_list.append(total_reward)
                     steps_list.append(n_steps)
@@ -213,12 +234,30 @@ if __name__ == '__main__':
         # Close the env and write monitor result info to disk
     except KeyboardInterrupt:
         pass
+    date = datetime.now().strftime("%Y%m%d")
+    time = datetime.now().strftime("%H%M")
+    saved_dir = os.path.join("data", date, time)
+    # export process
+    export_csv(saved_dir, "total_reward.csv", total_reward_list)
+    td_error_list = agent.td_error_list
+    export_csv(saved_dir, "td_error.csv", td_error_list)
     total_reward_list = np.array(total_reward_list)
     steps_list = np.array(steps_list)
     x = list(range(len(total_reward_list)))
-    plt.subplot(1,2,1)
+    plt.subplot(2,2,1)
+    y = moved_average(total_reward_list, 10)
     plt.plot(x, total_reward_list)
-    plt.subplot(1,2,2)
+    plt.plot(x, y, 'r--')
+    plt.subplot(2,2,2)
+    y = moved_average(steps_list, 10)
     plt.plot(x, steps_list)
+    plt.plot(x, y, 'r--')
+
+    plt.subplot(2,1,2)
+    y = moved_average(td_error_list, 1000)
+    x = list(range(len(td_error_list)))
+    plt.plot(x, td_error_list, 'k-')
+    plt.plot(x, y, 'r--', label='average')
+    plt.legend()
     plt.show()
     env.close()
