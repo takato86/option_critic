@@ -27,8 +27,8 @@ class OptionCriticAgent(object):
         self.q_u = np.random.rand(len(self.options), action_space.n)
         self.epsilon = 0.01
         self.gamma = 0.99
-        self.lr_wq = 0.05
-        self.lr_cphi = 0.05
+        self.lr_wq = 0.01
+        self.lr_cphi = 0.01
         # variables for analysis
         self.td_error_list = []
 
@@ -120,15 +120,45 @@ class OptionCriticAgent(object):
 
     def get_terminate(self, obs, o):
         return self.options[o].get_terminate(obs)
+    
+    def save_model(self, dir_path):
+        if not os.path.exists(dir_path):
+            os.makedirs(dir_path)
+        file_path = os.path.join(dir_path, 'oc_model.npz')
+        np.savez(file_path, w_q=self.w_q, c_phi=self.c_phi, q_u=self.q_u)
+        for i, option in enumerate(self.options):
+            option.save_model(os.path.join(dir_path, 'option{}.npz'.format(i+1)))
 
+    def load_model(self, dir_path):
+        file_path = os.path.join(dir_path, 'oc_model.npz')
+        oc_model = np.load(file_path)
+        if self._check_model(oc_model):
+            self.w_q = oc_model['w_q']
+            self.c_phi = oc_model['c_phi']
+            self.q_u = oc_model['q_u']
+        else:
+            raise Exception('Not suitable model data.')
+        for i, option in enumerate(self.options):
+            file_path = os.path.join(dir_path, 'option{}.npz'.format(i+1))
+            option.load_model(file_path)
+
+    def _check_model(self, model):
+        if model['w_q'].shape != self.w_q.shape:
+            return False
+        if model['c_phi'].shape != self.c_phi.shape:
+            return False
+        if model['q_u'].shape != self.q_u.shape:
+            return False
+        return True
+        
 
 class Option(object):
     def __init__(self, n_actions, n_obs):
         self.n_actions = n_actions
         self.theta = np.random.rand(n_actions)
         self.vartheta = np.random.rand(n_obs)
-        self.lr_theta = 0.01
-        self.lr_vartheta = 0.01
+        self.lr_theta = 0.001
+        self.lr_vartheta = 0.001
         # variables for analysis     
 
     def update(self, a, obs, q_u_list, q_omega, v_omega):
@@ -169,9 +199,27 @@ class Option(object):
         return numerator/denominator
     
     def exp(self, x):
-        np.where(x > 708, 708, x)
+        x = np.where(x > 709, 709, x)
         return np.exp(x)
-        
+    
+    def save_model(self, file_path):
+        np.savez(file_path, theta = self.theta, vartheta = self.vartheta)
+
+    def load_model(self, file_path):
+        option_model = np.load(file_path)
+        if self._check_model(option_model):
+            self.theta = option_model['theta']
+            self.vartheta = option_model['vartheta']
+        else:
+            raise Exception('Not suitable model data.')
+
+    def _check_model(self, model):
+        if model['theta'].shape != self.theta.shape:
+            return False
+        if model['vartheta'].shape != self.vartheta.shape:
+            return False
+        return True
+
 def export_csv(file_path, file_name, array):
     if not os.path.exists(file_path):
         os.makedirs(file_path)
@@ -187,6 +235,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=None)
     parser.add_argument('env_id', nargs='?', default='PinBall-v0', help='Select the environment to run')
     parser.add_argument('--debug', action='store_true')
+    parser.add_argument('--model', help='Input model dir path')
     args = parser.parse_args()
     env = gym.make(args.env_id)
 
@@ -194,7 +243,9 @@ if __name__ == '__main__':
     env = wrappers.Monitor(env, directory=outdir, force=True)
     env.seed(0)
     agent = OptionCriticAgent(env.action_space, env.observation_space)
-    episode_count = 10
+    if args.model:
+        agent.load_model(args.model)
+    episode_count = 200
     reward = 0
     done = False
     total_reward_list = []
@@ -238,26 +289,34 @@ if __name__ == '__main__':
     time = datetime.now().strftime("%H%M")
     saved_dir = os.path.join("data", date, time)
     # export process
-    export_csv(saved_dir, "total_reward.csv", total_reward_list)
+    saved_res_dir = os.path.join(saved_dir, 'res')
+    export_csv(saved_res_dir, "total_reward.csv", total_reward_list)
     td_error_list = agent.td_error_list
-    export_csv(saved_dir, "td_error.csv", td_error_list)
+    export_csv(saved_res_dir, "td_error.csv", td_error_list)
     total_reward_list = np.array(total_reward_list)
     steps_list = np.array(steps_list)
+    # save model
+    saved_model_dir = os.path.join(saved_dir, 'model')
+    agent.save_model(saved_model_dir)
+    # output graph
     x = list(range(len(total_reward_list)))
     plt.subplot(2,2,1)
     y = moved_average(total_reward_list, 10)
+    
     plt.plot(x, total_reward_list)
     plt.plot(x, y, 'r--')
+    plt.title("total_reward")
     plt.subplot(2,2,2)
     y = moved_average(steps_list, 10)
     plt.plot(x, steps_list)
     plt.plot(x, y, 'r--')
-
+    plt.title("the number of steps until goal")
     plt.subplot(2,1,2)
     y = moved_average(td_error_list, 1000)
     x = list(range(len(td_error_list)))
     plt.plot(x, td_error_list, 'k-')
     plt.plot(x, y, 'r--', label='average')
+    plt.title("td error")
     plt.legend()
     plt.show()
     env.close()
