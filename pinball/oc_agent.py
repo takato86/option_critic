@@ -10,6 +10,7 @@ import pdb
 import os
 from datetime import datetime
 import copy
+from tqdm import tqdm, trange
 
 class OptionCriticAgent(object):
     """
@@ -35,28 +36,33 @@ class OptionCriticAgent(object):
     def act(self, observation, o):
         option = self.options[o]
         q_u_list = self._get_q_u_list(observation, o)
-        action = np.argmax(option.get_intra_option_dist(q_u_list))
-        return action
+        # action = np.argmax(option.get_intra_option_dist(q_u_list))
+        intra_option_dist = option.get_intra_option_dist(q_u_list)
+        try:
+            action = np.random.choice(list(range(self.action_space.n)), 1, p=intra_option_dist)
+        except ValueError:
+            import pdb; pdb.set_trace()
+        return action[0]
     
-    def gestation(self, pre_obs, a, obs, r, done):
-        o = 0 # Optionは固定
-        option = self.options[o] 
-        q_u_list = self._get_q_u_list(pre_obs, o)
-        td_error = r - q_u_list[a]
-        if not done:
-            term_prob = option.get_terminate(obs)
-            q_omega_list = self._get_q_omega_list(obs)
-            td_error += self.gamma * ((1 - term_prob) * q_omega_list[o] + term_prob * np.max(q_omega_list))
-        self.td_error_list.append(abs(td_error))
-        self._update_w_q(td_error, a, o, pre_obs)
-        self._update_c_phi(td_error, a, o, pre_obs)
+    # def gestation(self, pre_obs, a, obs, r, done):
+    #     o = 0 # Optionは固定
+    #     option = self.options[o] 
+    #     q_u_list = self._get_q_u_list(pre_obs, o)
+    #     td_error = r - q_u_list[a]
+    #     if not done:
+    #         term_prob = option.get_terminate(obs)
+    #         q_omega_list = self._get_q_omega_list(obs)
+    #         td_error += self.gamma * ((1 - term_prob) * q_omega_list[o] + term_prob * np.max(q_omega_list))
+    #     self.td_error_list.append(abs(td_error))
+    #     self._update_w_q(td_error, a, o, pre_obs)
+    #     self._update_c_phi(td_error, a, o, pre_obs)
 
-    def sync_q_u(self):
-        base_w_q = self.w_q[0]
-        base_c_phi = self.c_phi[0]
-        for i in range(1, self.n_options):
-            self.w_q[i] = copy.deepcopy(base_w_q)
-            self.c_phi[i] = copy.deepcopy(base_c_phi)
+    # def sync_q_u(self):
+    #     base_w_q = self.w_q[0]
+    #     base_c_phi = self.c_phi[0]
+    #     for i in range(1, self.n_options):
+    #         self.w_q[i] = copy.deepcopy(base_w_q)
+    #         self.c_phi[i] = copy.deepcopy(base_c_phi)
 
     def update(self, pre_obs, a, obs, r, done, o):
         q_u_list = self._get_q_u_list(pre_obs, o)
@@ -68,33 +74,34 @@ class OptionCriticAgent(object):
             td_error += self.gamma * ((1 - term_prob) * q_omega_list[o] + term_prob * np.max(q_omega_list))
         self.td_error_list.append(abs(td_error))
         self._update_w_q(td_error, a, o, pre_obs)
-        self._update_c_phi(td_error, a, o, pre_obs)
+        # self._update_c_phi(td_error, a, o, pre_obs)
         q_omega = self._get_q_omega(obs, o)
         v_omega = self._get_v_omega(obs)
-        option.update(a, obs, q_u_list, q_omega, v_omega)
+        option.update(a, pre_obs, obs, q_u_list, q_omega, v_omega)
 
     def _update_w_q(self, td_error, a, o, obs):
         delta_list = []
         # TODO 行列計算の形で書き換え
-        for c_phi_a in self.c_phi[o][a]:
-            delta = np.cos(np.pi * np.dot(c_phi_a, obs))
-            delta_list.append(self.lr_wq * delta * td_error)
-        update_list = np.array(delta_list)
-        self.w_q[o][a] += update_list
+        delta = np.cos(np.pi * np.dot(self.c_phi[o][a], obs))
+        # for c_phi_a in self.c_phi[o][a]:
+        #     delta = np.cos(np.pi * np.dot(c_phi_a, obs))
+        #     delta_list.append(self.lr_wq * delta * td_error)
+        delta = np.array(delta)
+        self.w_q[o][a] += self.lr_wq * delta * td_error
     
-    def _update_c_phi(self, td_error, a, o, obs):
-        delta_list = []
-        # TODO 行列計算の形で書き換え
-        for i in range(self.basis_order):
-            c_delta_list = []
-            basis_delta = self.w_q[o][a][i] * -np.sin(np.pi * np.dot(self.c_phi[o][a][i], obs)) * np.pi
-            for j in range(len(obs)):
-                c_delta = self.lr_cphi * basis_delta * obs[j] * td_error
-                c_delta_list.append(c_delta)
-            delta_list.append(c_delta_list)
-        update_list = np.array(delta_list)
-        #if self.c_phi[o].shape[0] == update_list.shape[0] and self.c_phi[o].shape[1] == update_list.shape[1]:
-        self.c_phi[o][a] += update_list
+    # def _update_c_phi(self, td_error, a, o, obs):
+    #     delta_list = []
+    #     # TODO 行列計算の形で書き換え
+    #     for i in range(self.basis_order):
+    #         c_delta_list = []
+    #         basis_delta = self.w_q[o][a][i] * -np.sin(np.pi * np.dot(self.c_phi[o][a][i], obs)) * np.pi
+    #         for j in range(len(obs)):
+    #             c_delta = self.lr_cphi * basis_delta * obs[j] * td_error
+    #             c_delta_list.append(c_delta)
+    #         delta_list.append(c_delta_list)
+    #     update_list = np.array(delta_list)
+    #     #if self.c_phi[o].shape[0] == update_list.shape[0] and self.c_phi[o].shape[1] == update_list.shape[1]:
+    #     self.c_phi[o][a] += update_list
 
     def _get_q_u(self, obs, o, a):
         """
@@ -177,22 +184,27 @@ class OptionCriticAgent(object):
 class Option(object):
     def __init__(self, n_actions, n_obs):
         self.n_actions = n_actions
-        self.theta = np.random.rand(n_actions)
+        # self.theta = np.random.rand(n_actions)
+        self.theta = np.random.rand(1)
         self.vartheta = np.random.rand(n_obs)
         self.lr_theta = 0.001
         self.lr_vartheta = 0.001
         # variables for analysis     
 
-    def update(self, a, obs, q_u_list, q_omega, v_omega):
-        self._update_theta(a, obs, q_u_list)
+    def update(self, a, pre_obs, obs, q_u_list, q_omega, v_omega):
+        """
+        q_omega(obs, option), v_omega(obs, option)
+        q_u_list(pre_obs, option, a)
+        """
+        self._update_theta(a, pre_obs, q_u_list)
         self._update_vartheta(obs, q_omega, v_omega)
     
     def _update_theta(self, a, obs, q_u_list):
         """
         intra option policy gradient theorem
         """
-        #delta = -self.theta**-2*(q_u_list[a]+ np.sum(q_u_list))*q_u_list[a]
-        delta = -self.theta[a]**-2 * q_u_list[a]**2 * ( 1 - self.get_intra_option_dist(q_u_list)[a])
+        delta = q_u_list[a] - np.sum(q_u_list)
+        # delta = -self.theta[a]**-2 * q_u_list[a]**2 * ( 1 - self.get_intra_option_dist(q_u_list)[a])
         self.theta += self.lr_theta * q_u_list[a] * delta
 
     def _update_vartheta(self, obs, q_omega, v_omega):
@@ -201,6 +213,7 @@ class Option(object):
         """
         advantage = q_omega - v_omega
         beta = self.get_terminate(obs)
+        # TODO 行列計算に書き換え
         for i, s in enumerate(obs):
             self.vartheta[i] -= self.lr_vartheta * advantage * s * beta * (1 - beta)
 
@@ -215,7 +228,7 @@ class Option(object):
         """
         Boltzmann policies
         """
-        energy = q_u_list/self.theta
+        energy = q_u_list * self.theta
         numerator = self.exp(energy)
         denominator = np.sum(numerator)
         return numerator/denominator
@@ -267,17 +280,18 @@ if __name__ == '__main__':
     agent = OptionCriticAgent(env.action_space, env.observation_space)
     if args.model:
         agent.load_model(args.model)
-    episode_count = 500
+    episode_count = 100
     reward = 0
     done = False
     total_reward_list = []
     steps_list = []
     max_q_list = []
+    max_q_episode_list = []
+    max_q = 0.0
     try:
-        for i in range(episode_count):
+        for i in trange(episode_count):
             total_reward = 0
             n_steps = 0
-            print("episode: {}".format(i))
             ob = env.reset()
             option = agent.get_option(ob)
             while True:
@@ -288,7 +302,9 @@ if __name__ == '__main__':
                 pre_obs = ob
                 ob, reward, done, _ = env.step(action)
                 total_reward += reward
-                max_q_list.append(agent.get_max_q_u(ob, option))
+                tmp_max_q = agent.get_max_q_u(ob, option)
+                max_q_list.append(tmp_max_q)
+                max_q = tmp_max_q if tmp_max_q > max_q else max_q
                 if args.debug:
                     agent.update(pre_obs, action, ob, reward, done, option)
                     import pdb; pdb.set_trace()
@@ -298,18 +314,14 @@ if __name__ == '__main__':
                     total_reward_list.append(total_reward)
                     steps_list.append(n_steps)
                     break
-                if i <= 10:
-                    agent.gestation(pre_obs, action, ob, reward, done)
-                    if i==10:
-                        agent.sync_q_u()
-                else:
-                    agent.update(pre_obs, action, ob, reward, done, option)
-                    if agent.get_terminate(ob, option):
-                        option = agent.get_option(ob)
-                
+                agent.update(pre_obs, action, ob, reward, done, option)
+                if agent.get_terminate(ob, option):
+                    option = agent.get_option(ob)
+            
                 # Note there's no env.render() here. But the environment still can open window and
                 # render if asked by env.monitor: it calls env.render('rgb_array') to record video.
                 # Video is not recorded every episode, see capped_cubic_video_schedule for details.
+            max_q_episode_list.append(max_q)
 
         # Close the env and write monitor result info to disk
     except KeyboardInterrupt:
@@ -349,10 +361,10 @@ if __name__ == '__main__':
     plt.title("td error")
     plt.legend()
     plt.subplot(3,1,3)
-    y = moved_average(max_q_list, 1000)
-    x = list(range(len(max_q_list)))
-    plt.plot(x, max_q_list, 'k-')
-    plt.plot(x, y, 'r--', label='average')
+    y = moved_average(max_q_episode_list, 1000)
+    x = list(range(len(max_q_episode_list)))
+    plt.plot(x, max_q_episode_list, 'k-')
+    # plt.plot(x, y, 'r--', label='average')
     plt.title("max q_u value")
     plt.legend()
     plt.show()
