@@ -43,26 +43,6 @@ class OptionCriticAgent(object):
         except ValueError:
             import pdb; pdb.set_trace()
         return action[0]
-    
-    # def gestation(self, pre_obs, a, obs, r, done):
-    #     o = 0 # Optionは固定
-    #     option = self.options[o] 
-    #     q_u_list = self._get_q_u_list(pre_obs, o)
-    #     td_error = r - q_u_list[a]
-    #     if not done:
-    #         term_prob = option.get_terminate(obs)
-    #         q_omega_list = self._get_q_omega_list(obs)
-    #         td_error += self.gamma * ((1 - term_prob) * q_omega_list[o] + term_prob * np.max(q_omega_list))
-    #     self.td_error_list.append(abs(td_error))
-    #     self._update_w_q(td_error, a, o, pre_obs)
-    #     self._update_c_phi(td_error, a, o, pre_obs)
-
-    # def sync_q_u(self):
-    #     base_w_q = self.w_q[0]
-    #     base_c_phi = self.c_phi[0]
-    #     for i in range(1, self.n_options):
-    #         self.w_q[i] = copy.deepcopy(base_w_q)
-    #         self.c_phi[i] = copy.deepcopy(base_c_phi)
 
     def update(self, pre_obs, a, obs, r, done, o):
         q_u_list = self._get_q_u_list(pre_obs, o)
@@ -74,34 +54,15 @@ class OptionCriticAgent(object):
             td_error += self.gamma * ((1 - term_prob) * q_omega_list[o] + term_prob * np.max(q_omega_list))
         self.td_error_list.append(abs(td_error))
         self._update_w_q(td_error, a, o, pre_obs)
-        # self._update_c_phi(td_error, a, o, pre_obs)
         q_omega = self._get_q_omega(obs, o)
         v_omega = self._get_v_omega(obs)
         option.update(a, pre_obs, obs, q_u_list, q_omega, v_omega)
 
     def _update_w_q(self, td_error, a, o, obs):
         delta_list = []
-        # TODO 行列計算の形で書き換え
         delta = np.cos(np.pi * np.dot(self.c_phi[o][a], obs))
-        # for c_phi_a in self.c_phi[o][a]:
-        #     delta = np.cos(np.pi * np.dot(c_phi_a, obs))
-        #     delta_list.append(self.lr_wq * delta * td_error)
         delta = np.array(delta)
         self.w_q[o][a] += self.lr_wq * delta * td_error
-    
-    # def _update_c_phi(self, td_error, a, o, obs):
-    #     delta_list = []
-    #     # TODO 行列計算の形で書き換え
-    #     for i in range(self.basis_order):
-    #         c_delta_list = []
-    #         basis_delta = self.w_q[o][a][i] * -np.sin(np.pi * np.dot(self.c_phi[o][a][i], obs)) * np.pi
-    #         for j in range(len(obs)):
-    #             c_delta = self.lr_cphi * basis_delta * obs[j] * td_error
-    #             c_delta_list.append(c_delta)
-    #         delta_list.append(c_delta_list)
-    #     update_list = np.array(delta_list)
-    #     #if self.c_phi[o].shape[0] == update_list.shape[0] and self.c_phi[o].shape[1] == update_list.shape[1]:
-    #     self.c_phi[o][a] += update_list
 
     def _get_q_u(self, obs, o, a):
         """
@@ -187,8 +148,8 @@ class Option(object):
         # self.theta = np.random.rand(n_actions)
         self.theta = np.random.rand(1)
         self.vartheta = np.random.rand(n_obs)
-        self.lr_theta = 0.001
-        self.lr_vartheta = 0.001
+        self.lr_theta = 0.001 #0.001
+        self.lr_vartheta = 0.001 #0.001
         # variables for analysis     
 
     def update(self, a, pre_obs, obs, q_u_list, q_omega, v_omega):
@@ -213,9 +174,7 @@ class Option(object):
         """
         advantage = q_omega - v_omega
         beta = self.get_terminate(obs)
-        # TODO 行列計算に書き換え
-        for i, s in enumerate(obs):
-            self.vartheta[i] -= self.lr_vartheta * advantage * s * beta * (1 - beta)
+        self.vartheta -= self.lr_vartheta * advantage * obs * beta * (1 - beta)
 
     def get_terminate(self, obs):
         """
@@ -280,7 +239,7 @@ if __name__ == '__main__':
     agent = OptionCriticAgent(env.action_space, env.observation_space)
     if args.model:
         agent.load_model(args.model)
-    episode_count = 100
+    episode_count = 250
     reward = 0
     done = False
     total_reward_list = []
@@ -315,7 +274,8 @@ if __name__ == '__main__':
                     steps_list.append(n_steps)
                     break
                 agent.update(pre_obs, action, ob, reward, done, option)
-                if agent.get_terminate(ob, option):
+                rand_basis = np.random.rand()
+                if agent.get_terminate(ob, option) < rand_basis:
                     option = agent.get_option(ob)
             
                 # Note there's no env.render() here. But the environment still can open window and
