@@ -12,17 +12,17 @@ import os
 from datetime import datetime
 import copy
 from tqdm import tqdm, trange
-
+from visualizer import Visualizer
 class OptionCriticAgent(object):
     """
     価値関数近似：Fourier basis, https://scholarworks.umass.edu/cgi/viewcontent.cgi?referer=https://www.google.com/&httpsredir=1&article=1100&context=cs_faculty_pubs
 
     """
-    def __init__(self, action_space, observation_space):
+    def __init__(self, action_space, observation_space, n_options):
         self.action_space = action_space
         self.basis_order = 3
         self.shape_state = observation_space.shape
-        self.n_options = 4
+        self.n_options = n_options
         self.options = [Option(action_space.n, observation_space.shape[0]) for i in range(self.n_options)]
         self.w_q = np.random.rand(len(self.options), action_space.n, self.basis_order) # the number of orders
         self.c_phi = np.random.randint(0, self.basis_order + 1, (len(self.options), action_space.n, self.basis_order, observation_space.shape[0]))
@@ -33,12 +33,15 @@ class OptionCriticAgent(object):
         self.lr_cphi = 0.01
         # variables for analysis
         self.td_error_list = []
+        self.vis_action_dist = np.zeros(action_space.n)
+        self.vis_option_q = np.zeros(n_options)
 
     def act(self, observation, o):
         option = self.options[o]
         q_u_list = self._get_q_u_list(observation, o)
         # action = np.argmax(option.get_intra_option_dist(q_u_list))
         intra_option_dist = option.get_intra_option_dist(q_u_list)
+        self.vis_action_dist = intra_option_dist
         try:
             action = np.random.choice(list(range(self.action_space.n)), 1, p=intra_option_dist)
         except ValueError:
@@ -108,6 +111,7 @@ class OptionCriticAgent(object):
         rand = np.random.rand()
         if rand > self.epsilon:
             q_omega_list = self._get_q_omega_list(obs)
+            self.vis_option_q = q_omega_list
             return np.argmax(q_omega_list)
         else:
             return np.random.choice(self.n_options)
@@ -141,7 +145,6 @@ class OptionCriticAgent(object):
         if model['c_phi'].shape != self.c_phi.shape:
             return False
         return True
-        
 
 class Option(object):
     def __init__(self, n_actions, n_obs):
@@ -230,14 +233,17 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=None)
     parser.add_argument('env_id', nargs='?', default='PinBall-v0', help='Select the environment to run')
     parser.add_argument('--debug', action='store_true')
+    parser.add_argument('--vis', action='store_true')
     parser.add_argument('--model', help='Input model dir path')
     args = parser.parse_args()
     env = gym.make(args.env_id)
-
     outdir = '/tmp/random-agent-results'
     env = wrappers.Monitor(env, directory=outdir, force=True)
     env.seed(0)
-    agent = OptionCriticAgent(env.action_space, env.observation_space)
+    n_options = 4
+    agent = OptionCriticAgent(env.action_space, env.observation_space, n_options)
+    option_label = ["opt {}".format(str(i+1)) for i in range(n_options)]
+    vis = Visualizer(["ACC_X", "ACC_Y", "DEC_X", "DEC_Y", "ACC_NONE"], option_label)
     if args.model:
         agent.load_model(args.model)
     episode_count = 250
@@ -254,10 +260,12 @@ if __name__ == '__main__':
             n_steps = 0
             ob = env.reset()
             option = agent.get_option(ob)
+            is_render = False
             while True:
-                # if i % 5 == 0:
-                #     env.render()
-                n_steps += 1
+                if (i) % 5 == 0 and args.vis:
+                    env.render()
+                    is_render = True 
+                n_steps += 1    
                 action = agent.act(ob, option)
                 pre_obs = ob
                 ob, reward, done, _ = env.step(action)
@@ -278,6 +286,11 @@ if __name__ == '__main__':
                 rand_basis = np.random.rand()
                 if agent.get_terminate(ob, option) < rand_basis:
                     option = agent.get_option(ob)
+                
+                if is_render:
+                    vis.set_action_dist(agent.vis_action_dist, action)
+                    vis.set_option_q(agent.vis_option_q, option)
+                    vis.pause(.0001)
             
                 # Note there's no env.render() here. But the environment still can open window and
                 # render if asked by env.monitor: it calls env.render('rgb_array') to record video.
