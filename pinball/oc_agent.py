@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import sys
 import gym
 from gym import wrappers, logger
+sys.path.append('/Users/kerneltyu/anaconda3/envs/RL/lib/python3.6/site-packages/gym-pinball')
 import gym_pinball
 import pdb
 import os
