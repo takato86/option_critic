@@ -329,4 +329,5 @@ if __name__ == '__main__':
     plt.title("max q_u value")
     plt.legend()
     plt.show()
+    plt.savefig(os.path.join(saved_res_dir, "res_plot.png"))
     env.close()
