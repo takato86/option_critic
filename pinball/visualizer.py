@@ -40,11 +40,11 @@ class Visualizer(object):
         for i, i_option in enumerate(self.opt_q):
             i_option.set_height(option_q[i])
             i_option.set_color("b")
-        max_y, min_y = self.op_ax.get_ylim()
+        min_y, max_y = self.op_ax.get_ylim()
         max_y_q = np.max(option_q)
         min_y_q = np.min(option_q)
-        if max_y_q < max_y and min_y_q > min_y:
-            self.op_ax.set_ylim(min_y, max_y)
+        if max_y_q > max_y and min_y_q < min_y:
+            self.op_ax.set_ylim(min_y_q, max_y_q)
         elif max_y_q > max_y and min_y_q > min_y:
             self.op_ax.set_ylim(min_y, max_y_q)
         elif max_y_q < max_y and min_y_q < min_y:

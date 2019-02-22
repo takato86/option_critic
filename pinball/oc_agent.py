@@ -154,6 +154,7 @@ class Option(object):
         self.vartheta = np.random.rand(n_obs)
         self.lr_theta = 0.001 #0.001
         self.lr_vartheta = 0.001 #0.001
+        self.temperature = 1
         # variables for analysis     
 
     def update(self, a, pre_obs, obs, q_u_list, q_omega, v_omega):
@@ -161,7 +162,9 @@ class Option(object):
         q_omega(obs, option), v_omega(obs, option)
         q_u_list(pre_obs, option, a)
         """
-        self._update_theta(a, pre_obs, q_u_list)
+        # self._update_theta(a, pre_obs, q_u_list)
+        if self.temperature > 1:
+            self.temperature *= 0.99
         self._update_vartheta(obs, q_omega, v_omega)
     
     def _update_theta(self, a, obs, q_u_list):
@@ -191,7 +194,8 @@ class Option(object):
         """
         Boltzmann policies
         """
-        energy = q_u_list * self.theta
+        # energy = q_u_list * self.theta
+        energy = q_u_list / self.temperature
         numerator = self.exp(energy)
         denominator = np.sum(numerator)
         return numerator/denominator
@@ -262,7 +266,7 @@ if __name__ == '__main__':
             option = agent.get_option(ob)
             is_render = False
             while True:
-                if (i) % 5 == 0 and args.vis:
+                if (i+1) % 20 == 0 and args.vis:
                     env.render()
                     is_render = True 
                 n_steps += 1    
@@ -311,6 +315,7 @@ if __name__ == '__main__':
     total_reward_list = np.array(total_reward_list)
     steps_list = np.array(steps_list)
     max_q_list = np.array(max_q_list)
+    print("Average return: {}".format(np.average(total_reward_list)))
     # save model
     saved_model_dir = os.path.join(saved_dir, 'model')
     agent.save_model(saved_model_dir)
