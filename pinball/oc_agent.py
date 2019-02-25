@@ -13,6 +13,9 @@ from datetime import datetime
 import copy
 from tqdm import tqdm, trange
 from visualizer import Visualizer
+
+np.random.seed(seed = 32)
+
 class OptionCriticAgent(object):
     """
     価値関数近似：Fourier basis, https://scholarworks.umass.edu/cgi/viewcontent.cgi?referer=https://www.google.com/&httpsredir=1&article=1100&context=cs_faculty_pubs
@@ -23,9 +26,11 @@ class OptionCriticAgent(object):
         self.basis_order = 3
         self.shape_state = observation_space.shape
         self.n_options = n_options
-        self.options = [Option(action_space.n, observation_space.shape[0]) for i in range(self.n_options)]
+        self.options = [Option(action_space.n, observation_space.shape[0], self.basis_order) for i in range(self.n_options)]
         self.w_q = np.random.rand(len(self.options), action_space.n, self.basis_order) # the number of orders
-        self.c_phi = np.random.randint(0, self.basis_order + 1, (len(self.options), action_space.n, self.basis_order, observation_space.shape[0]))
+        self.c_phi = np.arange(len(self.options) * action_space.n * self.basis_order * observation_space.shape[0])
+        mapped_list = map(lambda x: x % (self.basis_order+1), self.c_phi)
+        self.c_phi = np.array(list(mapped_list)).reshape(len(self.options), action_space.n, self.basis_order, observation_space.shape[0])
         self.c_phi = self.c_phi.astype(np.float64)
         self.epsilon = 0.01
         self.gamma = 0.99
@@ -40,7 +45,8 @@ class OptionCriticAgent(object):
         option = self.options[o]
         q_u_list = self._get_q_u_list(observation, o)
         # action = np.argmax(option.get_intra_option_dist(q_u_list))
-        intra_option_dist = option.get_intra_option_dist(q_u_list)
+        # intra_option_dist = option.get_intra_option_dist(q_u_list)
+        intra_option_dist = option.get_intra_option_dist(observation)
         self.vis_action_dist = intra_option_dist
         try:
             action = np.random.choice(list(range(self.action_space.n)), 1, p=intra_option_dist)
@@ -82,7 +88,7 @@ class OptionCriticAgent(object):
     def _get_q_omega(self, obs, o):
         option = self.options[o]
         q_u_list = self._get_q_u_list(obs, o)
-        policy = option.get_intra_option_dist(q_u_list)
+        policy = option.get_intra_option_dist(obs)
         return np.dot(policy, q_u_list)
 
     def get_max_q_u(self, obs, o):
@@ -147,14 +153,19 @@ class OptionCriticAgent(object):
         return True
 
 class Option(object):
-    def __init__(self, n_actions, n_obs):
+    def __init__(self, n_actions, n_obs, basis_order):
         self.n_actions = n_actions
-        # self.theta = np.random.rand(n_actions)
-        self.theta = np.random.rand(1)
+        self.theta = np.random.rand(n_actions)
+        # self.c_phi_theta = np.random.randint(0, basis_order + 1, (n_actions, basis_order, n_obs))
+        self.c_phi_theta = np.arange(n_actions * basis_order * n_obs)
+        mapped_list = map(lambda x: x % (basis_order+1), self.c_phi_theta)
+        self.c_phi_theta = np.array(list(mapped_list)).reshape(n_actions, basis_order, n_obs)
+        self.c_phi_theta = self.c_phi_theta.astype(np.float64)
+        # self.theta = np.random.rand(1)
         self.vartheta = np.random.rand(n_obs)
         self.lr_theta = 0.001 #0.001
         self.lr_vartheta = 0.001 #0.001
-        self.temperature = 1
+        self.temperature = 10
         # variables for analysis     
 
     def update(self, a, pre_obs, obs, q_u_list, q_omega, v_omega):
@@ -162,7 +173,7 @@ class Option(object):
         q_omega(obs, option), v_omega(obs, option)
         q_u_list(pre_obs, option, a)
         """
-        # self._update_theta(a, pre_obs, q_u_list)
+        self._update_theta(a, pre_obs, q_u_list)
         if self.temperature > 1:
             self.temperature *= 0.99
         self._update_vartheta(obs, q_omega, v_omega)
@@ -171,7 +182,10 @@ class Option(object):
         """
         intra option policy gradient theorem
         """
-        delta = q_u_list[a] - np.sum(q_u_list)
+        intra_option_dist = self.get_intra_option_dist(obs)
+        pi_theta = intra_option_dist
+        # import pdb; pdb.set_trace()
+        delta = self._get_phi_theta(obs) * (1 - pi_theta[a]) #　温度パラメータを省略
         # delta = -self.theta[a]**-2 * q_u_list[a]**2 * ( 1 - self.get_intra_option_dist(q_u_list)[a])
         self.theta += self.lr_theta * q_u_list[a] * delta
 
@@ -190,16 +204,26 @@ class Option(object):
         linear_sum = np.dot(self.vartheta, obs)
         return 1/(1 + self.exp(linear_sum))
 
-    def get_intra_option_dist(self, q_u_list):
+    def get_intra_option_dist(self, obs):
         """
         Boltzmann policies
         """
+        x = np.array(obs) # >> (#obs)
+        phi = self._get_phi_theta(obs) # >> (1, #actions)
+        # import pdb; pdb.set_trace()
+        energy = self.theta.T * phi # / self.temperature # >> (1, #actions)
         # energy = q_u_list * self.theta
-        energy = q_u_list / self.temperature
+        # energy = q_u_list / self.temperature
         numerator = self.exp(energy)
         denominator = np.sum(numerator)
         return numerator/denominator
     
+    def _get_phi_theta(self, obs):
+        """
+        Returns: (1, #actions)
+        """
+        return np.cos(np.pi * np.sum(np.dot(self.c_phi_theta, obs), axis=1))
+
     def exp(self, x):
         x = np.where(x > 709, 709, x)
         return np.exp(x)
@@ -266,7 +290,7 @@ if __name__ == '__main__':
             option = agent.get_option(ob)
             is_render = False
             while True:
-                if (i+1) % 20 == 0 and args.vis:
+                if (i+1) % 2 == 0 and args.vis:
                     env.render()
                     is_render = True 
                 n_steps += 1    
