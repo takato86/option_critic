@@ -78,17 +78,17 @@ class OptionCriticAgent(object):
         option.update(a, pre_obs, obs, q_u_list, q_omega, v_omega)
 
     def _update_w_q_omega(self, pre_obs, a, obs, r, done, o):
-        # TODO check
+        # TODO check, modify if need.
         """
         This is for update of intra-option learning for policy over options
         """
         q_omega_list = self._get_q_omega_list(pre_obs)
-        next_q_omega_list = self._get_q_omega_list(obs)
         option = self.options[o]
         td_error = r - q_omega_list[o]
         if not done:
-            termination = option.get_terminate(obs)
-            td_error += self.gamma * ((1 - termination ) * next_q_omega_list[o] + termination * self._get_v_omega(obs))
+            term_prob = option.get_terminate(obs)
+            next_q_omega_list = self._get_q_omega_list(obs)
+            td_error += self.gamma * ((1 - term_prob ) * next_q_omega_list[o] + term_prob * self._get_v_omega(obs))
         grad = self._get_phi_omega(pre_obs) # check if the dimension is #basis_order
         self.w_omega[o] += self.lr_wq * td_error * grad
 
@@ -98,24 +98,15 @@ class OptionCriticAgent(object):
         """
         # TODO check
         q_u_list = self._get_q_u_list(pre_obs, o)
-        td_error = r - q_u_list[a]
         option = self.options[o]
+        td_error = r - q_u_list[a]
         if not done:
             term_prob = option.get_terminate(obs)
-            q_omega_list = self._get_q_omega_list(obs)
-            td_error += self.gamma * ((1 - term_prob) * q_omega_list[o] + term_prob * self._get_v_omega(obs))
+            next_q_omega_list = self._get_q_omega_list(obs)
+            td_error += self.gamma * ((1 - term_prob) * next_q_omega_list[o] + term_prob * self._get_v_omega(obs))
         self.td_error_list.append(abs(td_error))
         grad = self._get_phi(pre_obs, o)
         self.w_q_u[o][a] += self.lr_wq * td_error * grad
-
-    # def _get_q_u(self, obs, o, a):
-    #     """
-    #     Fourier basis of order 3
-    #     """
-    #     phis = np.array([self._get_phi(obs, o, a, i) for i in range(self.basis_order)])
-    #     # TODO check　なぜ足し合わせているのか？
-    #     appr_q = np.sum(np.dot(self.w_q[o], phis))
-    #     return appr_q
 
     def _get_q_omega_list(self, obs):
         # >> (1, #options)
