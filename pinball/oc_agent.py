@@ -212,7 +212,7 @@ class Option(object):
         phi_theta = self._get_phi_theta(obs)
         pi_theta = pi_theta.reshape(1,5)
         phi_theta = phi_theta.reshape(1,3)
-        grad = -np.dot(pi_theta.T, phi_theta) #温度パラメータは省略
+        grad = - np.dot(pi_theta.T, phi_theta) #温度パラメータは省略
         grad_a = phi_theta.reshape(3,)
         # delta = -self.theta[a]**-2 * q_u_list[a]**2 * ( 1 - self.get_intra_option_dist(q_u_list)[a])
         self.theta += self.lr_theta * q_u_list[a] * grad
@@ -374,9 +374,9 @@ if __name__ == '__main__':
     # agent.save_model(saved_model_dir)
     # output graph
     x = list(range(len(total_reward_list)))
+    plt.tight_layout()
     plt.subplot(3,2,1)
     y = moved_average(total_reward_list, 10)
-    
     plt.plot(x, total_reward_list)
     plt.plot(x, y, 'r--')
     plt.title("total_reward")
@@ -399,5 +399,6 @@ if __name__ == '__main__':
     # plt.plot(x, y, 'r--', label='average')
     plt.title("max q_u value")
     plt.legend()
+    plt.savefig(os.path.join(saved_res_dir, "plot.png"))
     plt.show()
     env.close()
