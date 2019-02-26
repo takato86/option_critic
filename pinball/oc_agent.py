@@ -26,26 +26,26 @@ class OptionCriticAgent(object):
         self.basis_order = 3
         self.shape_state = observation_space.shape
         self.n_options = n_options
-        self.options = [Option(action_space.n, observation_space.shape[0], self.basis_order) for i in range(self.n_options)]
         # Quの初期化
-        self.w_q_u = np.random.rand(len(self.options), action_space.n, self.basis_order) # the number of orders
-        self.c_phi = np.random.randint(0, self.basis_order + 1, (len(self.options), self.basis_order, observation_space.shape[0]))
+        self.w_q_u = np.random.rand(self.n_options, action_space.n, self.basis_order) # the number of orders
+        self.c_phi = np.random.randint(0, self.basis_order + 1, (self.basis_order, observation_space.shape[0]))
         # self.c_phi = np.arange(len(self.options) * self.basis_order * observation_space.shape[0])
         # mapped_list = map(lambda x: x % (self.basis_order+1), self.c_phi)
         # self.c_phi = np.array(list(mapped_list)).reshape(len(self.options), self.basis_order, observation_space.shape[0])
         self.c_phi = self.c_phi.astype(np.float64)
+        self.options = [Option(action_space.n, observation_space.shape[0], self.basis_order, self.c_phi) for i in range(self.n_options)]
         # Qomegaの初期化
-        self.w_omega = np.random.rand(len(self.options), self.basis_order)
-        self.c_phi_omega = np.random.randint(0, self.basis_order + 1, (self.basis_order, observation_space.shape[0]))
+        self.w_omega = np.random.rand(self.n_options, self.basis_order)
+        # self.c_phi_omega = np.random.randint(0, self.basis_order + 1, (self.basis_order, observation_space.shape[0]))
         # self.c_phi_omega = np.arange(self.basis_order * observation_space.shape[0])
         # mapped_list = map(lambda x: x % (self.basis_order+1), self.c_phi_omega)
         # self.c_phi_omega = np.array(list(mapped_list)).reshape(self.basis_order, observation_space.shape[0])
-        self.c_phi_omega = self.c_phi_omega.astype(np.float64)
+        # self.c_phi_omega = self.c_phi_omega.astype(np.float64)
         # Hyper parameters
         self.epsilon = 0.01
         self.gamma = 0.99
         self.lr_wq = 0.01
-        self.lr_cphi = 0.01
+        # self.lr_cphi = 0.01
         # variables for analysis
         self.td_error_list = []
         self.vis_action_dist = np.zeros(action_space.n)
@@ -89,7 +89,8 @@ class OptionCriticAgent(object):
             term_prob = option.get_terminate(obs)
             next_q_omega_list = self._get_q_omega_list(obs)
             td_error += self.gamma * ((1 - term_prob ) * next_q_omega_list[o] + term_prob * self._get_v_omega(obs))
-        grad = self._get_phi_omega(pre_obs) # check if the dimension is #basis_order
+        self.td_error_list.append(abs(td_error))
+        grad = self._get_phi(pre_obs) # check if the dimension is #basis_order
         self.w_omega[o] += self.lr_wq * td_error * grad
 
     def _update_w_q_u(self, pre_obs, a, obs, r, done, o):
@@ -104,31 +105,29 @@ class OptionCriticAgent(object):
             term_prob = option.get_terminate(obs)
             next_q_omega_list = self._get_q_omega_list(obs)
             td_error += self.gamma * ((1 - term_prob) * next_q_omega_list[o] + term_prob * self._get_v_omega(obs))
-        self.td_error_list.append(abs(td_error))
-        grad = self._get_phi(pre_obs, o)
+        grad = self._get_phi(pre_obs)
         self.w_q_u[o][a] += self.lr_wq * td_error * grad
 
     def _get_q_omega_list(self, obs):
         # >> (1, #options)
-        return np.dot(self.w_omega, self._get_phi_omega(obs).T)
+        return np.dot(self.w_omega, self._get_phi(obs))
         
-    def _get_phi_omega(self, obs):
-        # Returns >> (#options, #order)
-        x = np.array(obs)
-        return np.cos(np.pi * np.dot(self.c_phi_omega, x))
+    # def _get_phi_omega(self, obs):
+    #     # Returns >> (#options, #order)
+    #     x = np.array(obs)
+    #     return np.cos(np.pi * np.dot(self.c_phi_omega, x))
 
     def _get_q_u_list(self, obs, o):
         # check
-        return np.dot(self.w_q_u[o], self._get_phi(obs, o))
+        return np.dot(self.w_q_u[o], self._get_phi(obs))
 
-    def _get_phi(self, obs, o):
+    def _get_phi(self, obs):
         """
         Basis function: 基底関数
         """
         # check
-        c = self.c_phi[o]
         x = np.array(obs)
-        return np.cos(np.pi * np.dot(c, x))
+        return np.cos(np.pi * np.dot(self.c_phi, x))
 
     def get_max_q_u(self, obs, o):
         return np.max(self._get_q_u_list(obs, o))
@@ -180,14 +179,14 @@ class OptionCriticAgent(object):
         return True
 
 class Option(object):
-    def __init__(self, n_actions, n_obs, basis_order):
+    def __init__(self, n_actions, n_obs, basis_order, c_phi):
         self.n_actions = n_actions
         self.theta = np.random.rand(n_actions, basis_order)
-        self.c_phi_theta = np.random.randint(0, basis_order + 1, (basis_order, n_obs))
+        self.c_phi_theta = c_phi
         # self.c_phi_theta = np.arange(basis_order * n_obs)
         # mapped_list = map(lambda x: x % (basis_order+1), self.c_phi_theta)
         # self.c_phi_theta = np.array(list(mapped_list)).reshape(basis_order, n_obs)
-        self.c_phi_theta = self.c_phi_theta.astype(np.float64)
+        # self.c_phi_theta = self.c_phi_theta.astype(np.float64)
         # self.theta = np.random.rand(1)
         self.vartheta = np.random.rand(n_obs)
         self.lr_theta = 0.001 #0.001
@@ -200,7 +199,7 @@ class Option(object):
         q_omega(obs, option), v_omega(obs, option)
         q_u_list(pre_obs, option, a)
         """
-        self._update_theta(a, pre_obs, q_u_list)
+        self._update_theta(a, obs, q_u_list)
         # if self.temperature > 1:
         #     self.temperature *= 0.99
         self._update_vartheta(obs, q_omega, v_omega)
@@ -213,11 +212,11 @@ class Option(object):
         phi_theta = self._get_phi_theta(obs)
         pi_theta = pi_theta.reshape(1,5)
         phi_theta = phi_theta.reshape(1,3)
-        delta = - np.dot(pi_theta.T, phi_theta) #温度パラメータは省略
-        delta_a = phi_theta.reshape(3,)
+        grad = -np.dot(pi_theta.T, phi_theta) #温度パラメータは省略
+        grad_a = phi_theta.reshape(3,)
         # delta = -self.theta[a]**-2 * q_u_list[a]**2 * ( 1 - self.get_intra_option_dist(q_u_list)[a])
-        self.theta += self.lr_theta * q_u_list[a] * delta
-        self.theta[a] += self.lr_theta * q_u_list[a] * delta_a
+        self.theta += self.lr_theta * q_u_list[a] * grad
+        self.theta[a] += self.lr_theta * q_u_list[a] * grad_a
 
     def _update_vartheta(self, obs, q_omega, v_omega):
         """
@@ -232,7 +231,7 @@ class Option(object):
         linear-sigmoid functions
         """
         linear_sum = np.dot(self.vartheta, obs)
-        return 1/(1 + self.exp(linear_sum))
+        return 1/(1 + self.exp(-linear_sum))
 
     def get_intra_option_dist(self, obs):
         """
