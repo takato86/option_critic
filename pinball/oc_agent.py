@@ -33,6 +33,7 @@ class OptionCriticAgent(object):
         # mapped_list = map(lambda x: x % (self.basis_order+1), self.c_phi)
         # self.c_phi = np.array(list(mapped_list)).reshape(len(self.options), self.basis_order, observation_space.shape[0])
         self.c_phi = self.c_phi.astype(np.float64)
+        print(self.c_phi)
         self.options = [Option(action_space.n, observation_space.shape[0], self.basis_order, self.c_phi) for i in range(self.n_options)]
         # Qomegaの初期化
         self.w_omega = np.random.rand(self.n_options, self.basis_order)
@@ -48,6 +49,7 @@ class OptionCriticAgent(object):
         # self.lr_cphi = 0.01
         # variables for analysis
         self.td_error_list = []
+        self.td_error_list_meta = []
         self.vis_action_dist = np.zeros(action_space.n)
         self.vis_option_q = np.zeros(n_options)
 
@@ -64,16 +66,19 @@ class OptionCriticAgent(object):
             import pdb; pdb.set_trace()
         return action[0]
 
-    def update(self, pre_obs, a, obs, r, done, o):
+    def update(self, pre_o, pre_obs, pre_a, o, obs, a, r, done):
         """
         1. Update critic(pi_Omega: Intra Q Learning, pi_u: IntraAction Q learning)
         2. Improve actors
         """
-        self._update_w_q_omega(pre_obs, a, obs, r, done, o)
-        self._update_w_q_u(pre_obs, a, obs, r, done, o)
+        self._update_w_q_omega(pre_obs, pre_a, obs, r, done, pre_o)
+        self._update_w_q_u(pre_obs, pre_a, obs, r, done, pre_o)
         q_omega = self._get_q_omega_list(obs)[o]
         v_omega = self._get_v_omega(obs)
-        q_u_list = self._get_q_u_list(pre_obs, o)
+        q_u_list = self._get_q_u_list(obs, o)
+        # TODO this is baseline version.
+        q_u_list -= q_omega
+
         option = self.options[o]
         option.update(a, pre_obs, obs, q_u_list, q_omega, v_omega)
 
@@ -89,7 +94,7 @@ class OptionCriticAgent(object):
             term_prob = option.get_terminate(obs)
             next_q_omega_list = self._get_q_omega_list(obs)
             td_error += self.gamma * ((1 - term_prob ) * next_q_omega_list[o] + term_prob * self._get_v_omega(obs))
-        self.td_error_list.append(abs(td_error))
+        self.td_error_list_meta.append(abs(td_error))
         grad = self._get_phi(pre_obs) # check if the dimension is #basis_order
         self.w_omega[o] += self.lr_wq * td_error * grad
 
@@ -105,6 +110,7 @@ class OptionCriticAgent(object):
             term_prob = option.get_terminate(obs)
             next_q_omega_list = self._get_q_omega_list(obs)
             td_error += self.gamma * ((1 - term_prob) * next_q_omega_list[o] + term_prob * self._get_v_omega(obs))
+        self.td_error_list.append(abs(td_error))
         grad = self._get_phi(pre_obs)
         self.w_q_u[o][a] += self.lr_wq * td_error * grad
 
@@ -150,7 +156,7 @@ class OptionCriticAgent(object):
 
     def get_terminate(self, obs, o):
         return self.options[o].get_terminate(obs)
-    
+
     def save_model(self, dir_path):
         if not os.path.exists(dir_path):
             os.makedirs(dir_path)
@@ -300,7 +306,7 @@ if __name__ == '__main__':
     n_options = 4
     agent = OptionCriticAgent(env.action_space, env.observation_space, n_options)
     option_label = ["opt {}".format(str(i+1)) for i in range(n_options)]
-    vis = Visualizer(["ACC_X", "ACC_Y", "DEC_X", "DEC_Y", "ACC_NONE"], option_label)
+    vis = Visualizer(["ACC_X", "ACC_Y", "DEC_X", "DEC_Y", "NONE"], option_label)
     if args.model:
         agent.load_model(args.model)
     episode_count = 250
@@ -317,15 +323,24 @@ if __name__ == '__main__':
             n_steps = 0
             ob = env.reset()
             option = agent.get_option(ob)
+            pre_option = option
+            action = agent.act(ob, option)
+            pre_action = action
             is_render = False
             while True:
                 if (i+1) % 2 == 0 and args.vis:
                     env.render()
                     is_render = True 
-                n_steps += 1    
-                action = agent.act(ob, option)
                 pre_obs = ob
                 ob, reward, done, _ = env.step(action)
+                n_steps += 1   
+                rand_basis = np.random.rand()
+                if agent.get_terminate(ob, option) < rand_basis:
+                    pre_option = option
+                    option = agent.get_option(ob)
+                pre_action = action
+                action = agent.act(ob, option)
+                agent.update(pre_option, pre_obs, pre_action, option, ob, action, reward, done)
                 total_reward += reward
                 tmp_max_q = agent.get_max_q_u(ob, option)
                 max_q_list.append(tmp_max_q)
@@ -338,11 +353,7 @@ if __name__ == '__main__':
                     print("episode: {}, steps: {}, total_reward: {}, max_q_u: {}".format(i, n_steps, total_reward, max_q_list[-1]))
                     total_reward_list.append(total_reward)
                     steps_list.append(n_steps)
-                    break 
-                agent.update(pre_obs, action, ob, reward, done, option)
-                rand_basis = np.random.rand()
-                if agent.get_terminate(ob, option) < rand_basis:
-                    option = agent.get_option(ob)
+                    break
                 
                 if is_render:
                     vis.set_action_dist(agent.vis_action_dist, action)
@@ -364,6 +375,7 @@ if __name__ == '__main__':
     saved_res_dir = os.path.join(saved_dir, 'res')
     export_csv(saved_res_dir, "total_reward.csv", total_reward_list)
     td_error_list = agent.td_error_list
+    td_error_list_meta = agent.td_error_list_meta
     export_csv(saved_res_dir, "td_error.csv", td_error_list)
     total_reward_list = np.array(total_reward_list)
     steps_list = np.array(steps_list)
@@ -374,31 +386,38 @@ if __name__ == '__main__':
     # agent.save_model(saved_model_dir)
     # output graph
     x = list(range(len(total_reward_list)))
-    plt.tight_layout()
-    plt.subplot(3,2,1)
+    plt.subplot(4,2,1)
     y = moved_average(total_reward_list, 10)
     plt.plot(x, total_reward_list)
     plt.plot(x, y, 'r--')
     plt.title("total_reward")
-    plt.subplot(3,2,2)
+    plt.subplot(4,2,2)
     y = moved_average(steps_list, 10)
     plt.plot(x, steps_list)
     plt.plot(x, y, 'r--')
     plt.title("the number of steps until goal")
-    plt.subplot(3,1,2)
+    plt.subplot(4,1,2)
     y = moved_average(td_error_list, 1000)
     x = list(range(len(td_error_list)))
     plt.plot(x, td_error_list, 'k-')
     plt.plot(x, y, 'r--', label='average')
-    plt.title("td error")
+    plt.title("intra-option Q critic td error")
     plt.legend()
-    plt.subplot(3,1,3)
+    plt.subplot(4,1,3)
+    y = moved_average(td_error_list_meta, 1000)
+    x = list(range(len(td_error_list_meta)))
+    plt.plot(x, td_error_list_meta, 'k-')
+    plt.plot(x, y, 'r--', label='average')
+    plt.title("intra-option Q learning td error")
+    plt.legend()
+    plt.subplot(4,1,4)
     y = moved_average(max_q_episode_list, 1000)
     x = list(range(len(max_q_episode_list)))
     plt.plot(x, max_q_episode_list, 'k-')
     # plt.plot(x, y, 'r--', label='average')
     plt.title("max q_u value")
     plt.legend()
+    plt.tight_layout()
     plt.savefig(os.path.join(saved_res_dir, "plot.png"))
     plt.show()
     env.close()
