@@ -13,6 +13,7 @@ from datetime import datetime
 import copy
 from tqdm import tqdm, trange
 from visualizer import Visualizer
+import time
 
 np.random.seed(seed = 32)
 
@@ -29,6 +30,7 @@ class OptionCriticAgent(object):
         # Quの初期化
         self.w_q_u = np.random.rand(self.n_options, action_space.n, self.basis_order) # the number of orders
         self.c_phi = np.random.randint(0, self.basis_order + 1, (self.basis_order, observation_space.shape[0]))
+        # self.c_phi = np.array([[0., 1., 2., 3.],[1., 3., 0., 2.],[2., 0., 3., 1.]])
         # self.c_phi = np.arange(len(self.options) * self.basis_order * observation_space.shape[0])
         # mapped_list = map(lambda x: x % (self.basis_order+1), self.c_phi)
         # self.c_phi = np.array(list(mapped_list)).reshape(len(self.options), self.basis_order, observation_space.shape[0])
@@ -78,9 +80,9 @@ class OptionCriticAgent(object):
         q_u_list = self._get_q_u_list(obs, o)
         # TODO this is baseline version.
         q_u_list -= q_omega
-
-        option = self.options[o]
-        option.update(a, pre_obs, obs, q_u_list, q_omega, v_omega)
+        option = self.options[pre_o]
+        next_option = self.options[o]
+        option.update(a, pre_obs, obs, q_u_list, q_omega, v_omega, next_option)
 
     def _update_w_q_omega(self, pre_obs, a, obs, r, done, o):
         # TODO check, modify if need.
@@ -161,7 +163,7 @@ class OptionCriticAgent(object):
         if not os.path.exists(dir_path):
             os.makedirs(dir_path)
         file_path = os.path.join(dir_path, 'oc_model.npz')
-        np.savez(file_path, w_q=self.w_q, c_phi=self.c_phi)
+        np.savez(file_path, w_q_u=self.w_q_u, w_omega=self.w_omega, c_phi=self.c_phi)
         for i, option in enumerate(self.options):
             option.save_model(os.path.join(dir_path, 'option{}.npz'.format(i+1)))
 
@@ -169,7 +171,8 @@ class OptionCriticAgent(object):
         file_path = os.path.join(dir_path, 'oc_model.npz')
         oc_model = np.load(file_path)
         if self._check_model(oc_model):
-            self.w_q = oc_model['w_q']
+            self.w_q_u = oc_model['w_q_u']
+            self.w_omega = oc_model['w_omega']
             self.c_phi = oc_model['c_phi']
         else:
             raise Exception('Not suitable model data.')
@@ -178,7 +181,9 @@ class OptionCriticAgent(object):
             option.load_model(file_path)
 
     def _check_model(self, model):
-        if model['w_q'].shape != self.w_q.shape:
+        if model['w_q_u'].shape != self.w_q_u.shape:
+            return False
+        if model['w_omega'].shape != self.w_omega.shape:
             return False
         if model['c_phi'].shape != self.c_phi.shape:
             return False
@@ -200,22 +205,22 @@ class Option(object):
         self.temperature = 1.0
         # variables for analysis     
 
-    def update(self, a, pre_obs, obs, q_u_list, q_omega, v_omega):
+    def update(self, a, pre_obs, obs, q_u_list, q_omega, v_omega, next_option):
         """
         q_omega(obs, option), v_omega(obs, option)
         q_u_list(pre_obs, option, a)
         """
-        self._update_theta(a, obs, q_u_list)
+        self._update_theta(a, obs, q_u_list, next_option)
         # if self.temperature > 1:
         #     self.temperature *= 0.99
-        self._update_vartheta(obs, q_omega, v_omega)
+        self._update_vartheta(obs, q_omega, v_omega, next_option)
     
-    def _update_theta(self, a, obs, q_u_list):
+    def _update_theta(self, a, obs, q_u_list, next_option):
         """
         intra option policy gradient theorem
         """
-        pi_theta = self.get_intra_option_dist(obs)
-        phi_theta = self._get_phi_theta(obs)
+        pi_theta = next_option.get_intra_option_dist(obs)
+        phi_theta = next_option._get_phi_theta(obs)
         pi_theta = pi_theta.reshape(1,5)
         phi_theta = phi_theta.reshape(1,3)
         grad = - np.dot(pi_theta.T, phi_theta) #温度パラメータは省略
@@ -224,12 +229,12 @@ class Option(object):
         self.theta += self.lr_theta * q_u_list[a] * grad
         self.theta[a] += self.lr_theta * q_u_list[a] * grad_a
 
-    def _update_vartheta(self, obs, q_omega, v_omega):
+    def _update_vartheta(self, obs, q_omega, v_omega, next_option):
         """
         termination function gradient theorem
         """
         advantage = q_omega - v_omega
-        beta = self.get_terminate(obs)
+        beta = next_option.get_terminate(obs)
         self.vartheta -= self.lr_vartheta * advantage * obs * beta * (1 - beta)
 
     def get_terminate(self, obs):
@@ -317,6 +322,7 @@ if __name__ == '__main__':
     max_q_list = []
     max_q_episode_list = []
     max_q = 0.0
+    learning_time = time.time()
     try:
         for i in trange(episode_count):
             total_reward = 0
@@ -368,6 +374,8 @@ if __name__ == '__main__':
         # Close the env and write monitor result info to disk
     except KeyboardInterrupt:
         pass
+    duration = time.time() - learning_time
+    print("Learning time: {}m {}s".format(int(duration//60), int(duration%60)))
     date = datetime.now().strftime("%Y%m%d")
     time = datetime.now().strftime("%H%M")
     saved_dir = os.path.join("data", date, time)
@@ -383,7 +391,7 @@ if __name__ == '__main__':
     print("Average return: {}".format(np.average(total_reward_list)))
     # save model
     saved_model_dir = os.path.join(saved_dir, 'model')
-    # agent.save_model(saved_model_dir)
+    agent.save_model(saved_model_dir)
     # output graph
     x = list(range(len(total_reward_list)))
     plt.subplot(4,2,1)
