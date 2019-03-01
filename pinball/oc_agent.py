@@ -17,6 +17,7 @@ from tqdm import tqdm, trange
 from visualizer import Visualizer
 from scipy.special import expit
 from scipy.misc import logsumexp
+import time
 
 np.random.seed(seed = 32)
 
@@ -167,7 +168,9 @@ class OptionCriticAgent(object):
             option.load_model(file_path)
 
     def _check_model(self, model):
-        if model['w_q'].shape != self.w_q.shape:
+        if model['w_q_u'].shape != self.w_q_u.shape:
+            return False
+        if model['w_omega'].shape != self.w_omega.shape:
             return False
         return True
 
@@ -285,6 +288,7 @@ if __name__ == '__main__':
     max_q_list = []
     max_q_episode_list = []
     max_q = 0.0
+    learning_time = time.time()
     try:
         for i in trange(episode_count):
             total_reward = 0
@@ -333,6 +337,8 @@ if __name__ == '__main__':
         # Close the env and write monitor result info to disk
     except KeyboardInterrupt:
         pass
+    duration = time.time() - learning_time
+    print("Learning time: {}m {}s".format(int(duration//60), int(duration%60)))
     date = datetime.now().strftime("%Y%m%d")
     time = datetime.now().strftime("%H%M")
     saved_dir = os.path.join("data", date, time)
@@ -348,7 +354,7 @@ if __name__ == '__main__':
     print("Average return: {}".format(np.average(total_reward_list)))
     # save model
     saved_model_dir = os.path.join(saved_dir, 'model')
-    # agent.save_model(saved_model_dir)
+    agent.save_model(saved_model_dir)
     # output graph
     x = list(range(len(total_reward_list)))
     plt.subplot(4,2,1)
