@@ -7,7 +7,6 @@ import gym
 from gym import wrappers, logger
 sys.path.append('/Users/kerneltyu/anaconda3/envs/RL/lib/python3.6/site-packages/gym-pinball')
 import gym_pinball
-from pinball import PinballDomain
 from fourier import FourierBasis
 import pdb
 import os
@@ -152,7 +151,7 @@ class OptionCriticAgent(object):
         if not os.path.exists(dir_path):
             os.makedirs(dir_path)
         file_path = os.path.join(dir_path, 'oc_model.npz')
-        np.savez(file_path, w_q=self.w_q)
+        np.savez(file_path, w_q_u=self.w_q_u, w_omega=self.w_omega)
         for i, option in enumerate(self.options):
             option.save_model(os.path.join(dir_path, 'option{}.npz'.format(i+1)))
 
@@ -160,7 +159,8 @@ class OptionCriticAgent(object):
         file_path = os.path.join(dir_path, 'oc_model.npz')
         oc_model = np.load(file_path)
         if self._check_model(oc_model):
-            self.w_q = oc_model['w_q']
+            self.w_q_u = oc_model['w_q_u']
+            self.w_omega = oc_model['w_omega']
         else:
             raise Exception('Not suitable model data.')
         for i, option in enumerate(self.options):
@@ -271,8 +271,11 @@ if __name__ == '__main__':
     parser.add_argument('--model', help='Input model dir path')
     args = parser.parse_args()
     env = gym.make(args.env_id)
-    outdir = '/tmp/random-agent-results'
-    env = wrappers.Monitor(env, directory=outdir, force=True)
+    date = datetime.now().strftime("%Y%m%d")
+    day_time = datetime.now().strftime("%H%M")
+    saved_dir = os.path.join("data", date, day_time)
+    movie_dir = os.path.join(saved_dir, "movie")
+    env = wrappers.Monitor(env, movie_dir, video_callable=(lambda ep:ep % 50 == 0))
     env.seed(0)
     n_options = 4
     agent = OptionCriticAgent(env.action_space, env.observation_space, n_options)
@@ -288,11 +291,13 @@ if __name__ == '__main__':
     max_q_list = []
     max_q_episode_list = []
     max_q = 0.0
+    avg_option_steps_list = []
     learning_time = time.time()
     try:
         for i in trange(episode_count):
             total_reward = 0
             n_steps = 0
+            n_option_steps = 0
             ob = env.reset()
             option = agent.get_option(ob)
             pre_option = option
@@ -301,14 +306,17 @@ if __name__ == '__main__':
             agent.set_last_q_omega(option, ob)
             is_render = False
             while True:
-                if (i+1) % 20 == 0 and args.vis:
+                if (i+1) % 50 == 0 and args.vis:
                     env.render()
                     is_render = True 
                 pre_obs = ob
                 ob, reward, done, _ = env.step(action)
                 n_steps += 1   
+                n_option_steps += 1
                 rand_basis = np.random.uniform()
-                if agent.get_terminate(ob, option) > rand_basis:
+                if agent.get_terminate(ob, option) > rand_basis and not done:
+                    avg_option_steps_list.append(n_option_steps)
+                    n_option_steps = 0
                     pre_option = option
                     option = agent.get_option(ob)
                 pre_action = action
@@ -320,6 +328,7 @@ if __name__ == '__main__':
                 max_q = tmp_max_q if tmp_max_q > max_q else max_q
                 if done:
                     print("episode: {}, steps: {}, total_reward: {}, max_q_u: {}".format(i, n_steps, total_reward, max_q_list[-1]))
+                    avg_option_steps_list.append(n_option_steps)
                     total_reward_list.append(total_reward)
                     steps_list.append(n_steps)
                     break
@@ -337,11 +346,9 @@ if __name__ == '__main__':
         # Close the env and write monitor result info to disk
     except KeyboardInterrupt:
         pass
+    env.close()
     duration = time.time() - learning_time
     print("Learning time: {}m {}s".format(int(duration//60), int(duration%60)))
-    date = datetime.now().strftime("%Y%m%d")
-    time = datetime.now().strftime("%H%M")
-    saved_dir = os.path.join("data", date, time)
     # export process
     saved_res_dir = os.path.join(saved_dir, 'res')
     export_csv(saved_res_dir, "total_reward.csv", total_reward_list)
@@ -357,39 +364,40 @@ if __name__ == '__main__':
     agent.save_model(saved_model_dir)
     # output graph
     x = list(range(len(total_reward_list)))
-    plt.subplot(4,2,1)
+    plt.subplot(2,2,1)
     y = moved_average(total_reward_list, 10)
     plt.plot(x, total_reward_list)
     plt.plot(x, y, 'r--')
     plt.title("total_reward")
-    plt.subplot(4,2,2)
+    plt.subplot(2,2,2)
     y = moved_average(steps_list, 10)
     plt.plot(x, steps_list)
     plt.plot(x, y, 'r--')
     plt.title("the number of steps until goal")
-    plt.subplot(4,1,2)
-    y = moved_average(td_error_list, 1000)
-    x = list(range(len(td_error_list)))
-    plt.plot(x, td_error_list, 'k-')
-    plt.plot(x, y, 'r--', label='average')
-    plt.title("intra-option Q critic td error")
-    plt.legend()
-    plt.subplot(4,1,3)
-    y = moved_average(td_error_list_meta, 1000)
-    x = list(range(len(td_error_list_meta)))
-    plt.plot(x, td_error_list_meta, 'k-')
-    plt.plot(x, y, 'r--', label='average')
-    plt.title("intra-option Q learning td error")
-    plt.legend()
-    plt.subplot(4,1,4)
-    y = moved_average(max_q_episode_list, 1000)
-    x = list(range(len(max_q_episode_list)))
-    plt.plot(x, max_q_episode_list, 'k-')
+    plt.subplot(2,1,2)
+    x = list(range(len(avg_option_steps_list)))
+    plt.plot(x, avg_option_steps_list)
+    plt.title("average steps of an option")
+    # y = moved_average(td_error_list, 1000)
+    # x = list(range(len(td_error_list)))
+    # plt.plot(x, td_error_list, 'k-')
     # plt.plot(x, y, 'r--', label='average')
-    plt.title("max q_u value")
-    plt.legend()
+    # plt.title("intra-option Q critic td error")
+    # plt.legend()
+    # plt.subplot(4,1,3)
+    # y = moved_average(td_error_list_meta, 1000)
+    # x = list(range(len(td_error_list_meta)))
+    # plt.plot(x, td_error_list_meta, 'k-')
+    # plt.plot(x, y, 'r--', label='average')
+    # plt.title("intra-option Q learning td error")
+    # plt.legend()
+    # plt.subplot(4,1,4)
+    # y = moved_average(max_q_episode_list, 1000)
+    # x = list(range(len(max_q_episode_list)))
+    # plt.plot(x, max_q_episode_list, 'k-')
+    # # plt.plot(x, y, 'r--', label='average')
+    # plt.title("max q_u value")
+    # plt.legend()
     plt.tight_layout()
     plt.savefig(os.path.join(saved_res_dir, "plot.png"))
     plt.show()
-    plt.savefig(os.path.join(saved_res_dir, "res_plot.png"))
-    env.close()
